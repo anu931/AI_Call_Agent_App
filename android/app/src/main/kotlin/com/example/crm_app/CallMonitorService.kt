@@ -33,8 +33,7 @@ class CallMonitorService : Service() {
         private const val CHANNEL_ID      = "call_monitor_channel"
         private const val NOTIF_ID        = 1001
 
-        // ← Change to your backend IP/port
-        private const val BACKEND_BASE    = "http://192.168.1.3:8000"
+        private const val BACKEND_BASE = "http://192.168.1.6:8000"
     }
 
     private var mediaRecorder: MediaRecorder? = null
@@ -77,30 +76,57 @@ class CallMonitorService : Service() {
     // ─── recording ────────────────────────────────────────────────────────────
 
     private fun startRecording(phoneNumber: String, isIncoming: Boolean) {
-        if (isRecording) return
-        try {
-            val dir = File(getExternalFilesDir(null), "recordings").also { if (!it.exists()) it.mkdirs() }
-            val ts  = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-            currentRecordingPath = File(dir, "CALL_${ts}_${phoneNumber.replace("+", "")}.m4a").absolutePath
+    if (isRecording) return
+    try {
+        val dir = File(getExternalFilesDir(null), "recordings").also { if (!it.exists()) it.mkdirs() }
+        val ts  = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        currentRecordingPath = File(dir, "CALL_${ts}_${phoneNumber.replace("+", "")}.m4a").absolutePath
 
-            mediaRecorder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                MediaRecorder(this) else @Suppress("DEPRECATION") MediaRecorder()).apply {
-                setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioSamplingRate(44100)
-                setAudioEncodingBitRate(128000)
-                setOutputFile(currentRecordingPath)
-                prepare()
-                start()
+        // Try audio sources in order — different devices support different ones
+        val audioSources = listOf(
+            MediaRecorder.AudioSource.VOICE_CALL,           // Best — both sides
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,  // Good — VoIP calls
+            MediaRecorder.AudioSource.MIC,                  // Fallback — mic only
+            MediaRecorder.AudioSource.DEFAULT,              // Last resort
+        )
+
+        var recorderStarted = false
+        for (source in audioSources) {
+            try {
+                mediaRecorder = (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                    MediaRecorder(this) else @Suppress("DEPRECATION") MediaRecorder()).apply {
+                    setAudioSource(source)
+                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                    setAudioSamplingRate(44100)
+                    setAudioEncodingBitRate(128000)
+                    setOutputFile(currentRecordingPath)
+                    prepare()
+                    start()
+                }
+                isRecording = true
+                recorderStarted = true
+                Log.d(TAG, "Recording started with source $source: $currentRecordingPath")
+                break  // Stop trying once one works
+            } catch (e: Exception) {
+                Log.w(TAG, "Audio source $source failed: ${e.message}, trying next...")
+                mediaRecorder?.release()
+                mediaRecorder = null
             }
-            isRecording = true
-            updateNotification("CRM: Recording — $phoneNumber")
-            Log.d(TAG, "Recording started: $currentRecordingPath")
-        } catch (e: Exception) {
-            Log.e(TAG, "Start recording failed: ${e.message}")
-            mediaRecorder?.release(); mediaRecorder = null; isRecording = false
         }
+
+        if (!recorderStarted) {
+            Log.e(TAG, "All audio sources failed")
+            isRecording = false
+        } else {
+            updateNotification("CRM: Recording — $phoneNumber")
+        }
+    catch (e: Exception) {
+        Log.e(TAG, "Start recording failed: ${e.message}")
+        mediaRecorder?.release()
+        mediaRecorder = null
+        isRecording = false
+       }
     }
 
     private fun stopAndSave(phoneNumber: String, duration: Int, isIncoming: Boolean) {

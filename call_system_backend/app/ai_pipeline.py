@@ -13,7 +13,7 @@ _whisper_model = None
 _sentiment_pipeline = None
 _embed_model = None
 
-WHISPER_SIZE = os.getenv("WHISPER_SIZE", "tiny")
+WHISPER_SIZE = os.getenv("WHISPER_SIZE", "small")
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.80"))
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 SENTIMENT_MODEL = "cardiffnlp/twitter-roberta-base-sentiment-latest"

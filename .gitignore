@@ -1,6 +1,58 @@
-build/ 
-.dart_tool/ 
-.flutter-plugins 
-.flutter-plugins-dependencies 
-.idea/ 
-*.iml 
+# ── Python backend ────────────────────────────────────────────────────────────
+call_system_backend/venv/
+call_system_backend/__pycache__/
+call_system_backend/app/__pycache__/
+call_system_backend/app/api/__pycache__/
+call_system_backend/app/models/__pycache__/
+call_system_backend/*.db
+call_system_backend/uploads/
+*.pyc
+*.pyo
+*.pyd
+.env
+
+# ── Flutter ───────────────────────────────────────────────────────────────────
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+*.g.dart
+*.freezed.dart
+pubspec.lock
+
+# ── Android ───────────────────────────────────────────────────────────────────
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/key.properties
+*.jks
+*.keystore
+
+# ── iOS ───────────────────────────────────────────────────────────────────────
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Runner.xcworkspace/
+*.ipa
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/settings.json
+*.iml
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Recordings (real call audio — never commit) ───────────────────────────────
+*.m4a
+*.mp3
+*.wav
+*.aac
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
