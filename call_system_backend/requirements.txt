@@ -1,6 +1,8 @@
 fastapi
 uvicorn[standard]
 python-multipart
+anthropic
+python-dotenv
 
 # AI pipeline
 openai-whisper
@@ -9,6 +11,3 @@ transformers
 accelerate
 sentencepiece
 sentence-transformers
-
-# Speaker diarization (needs HF_TOKEN env var for pyannote/speaker-diarization-3.1)
-pyannote.audio
