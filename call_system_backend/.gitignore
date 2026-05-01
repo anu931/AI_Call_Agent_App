@@ -5,3 +5,18 @@ build/
 .flutter-plugins-dependencies
 *.iml
 .idea/
+
+# Python
+__pycache__/
+*.pyc
+.env
+venv/
+
+# ML models & checkpoints
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+checkpoint-*/
+call_center_lora_adapter/
