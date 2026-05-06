@@ -2,7 +2,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sqlite3
 from datetime import datetime
 from typing import Optional
 
@@ -18,24 +17,25 @@ log = logging.getLogger("ai_pipeline")
 # ─────────────────────────────────────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────────────────────────────────────
-WHISPER_SIZE        = os.getenv("WHISPER_SIZE", "small")
+WHISPER_SIZE         = os.getenv("WHISPER_SIZE", "small")
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.80"))
-SENTIMENT_MODEL     = "cardiffnlp/twitter-roberta-base-sentiment-latest"
-EMBED_MODEL         = "sentence-transformers/all-MiniLM-L6-v2"
+SENTIMENT_MODEL      = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+EMBED_MODEL          = "sentence-transformers/all-MiniLM-L6-v2"
 FINETUNED_MODEL_PATH = os.getenv("FINETUNED_MODEL_PATH", "./call_center_lora_adapter")
+CHROMA_DIR           = os.getenv("CHROMA_DIR", "./chroma_db")
 
-# Auto-detect GPU — falls back to CPU on machines without NVIDIA GPU
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 log.info("Running on device: %s", DEVICE)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Lazy-loaded model singletons
+# Lazy-loaded singletons
 # ─────────────────────────────────────────────────────────────────────────────
-_whisper_model      = None
-_sentiment_pipeline = None
-_embed_model        = None
-_finetuned_model    = None
+_whisper_model       = None
+_sentiment_pipeline  = None
+_embed_model         = None
+_finetuned_model     = None
 _finetuned_tokenizer = None
+_chroma_collection   = None
 
 
 def _get_whisper():
@@ -65,23 +65,33 @@ def _get_embedder():
     return _embed_model
 
 
+def _get_chroma():
+    """Return ChromaDB collection — persistent, stored in ./chroma_db/"""
+    global _chroma_collection
+    if _chroma_collection is None:
+        import chromadb
+        client = chromadb.PersistentClient(path=CHROMA_DIR)
+        _chroma_collection = client.get_or_create_collection(
+            name="customer_issues",
+            metadata={"hnsw:space": "cosine"},
+        )
+        log.info("ChromaDB collection ready at %s", CHROMA_DIR)
+    return _chroma_collection
+
+
 def _get_finetuned_model():
-    """Load fine-tuned LoRA adapter. Works on both GPU (4-bit) and CPU (float32)."""
     global _finetuned_model, _finetuned_tokenizer
     if _finetuned_model is None:
         adapter_config_path = os.path.join(FINETUNED_MODEL_PATH, "adapter_config.json")
         if not os.path.exists(adapter_config_path):
             raise FileNotFoundError(
-                f"adapter_config.json not found in {FINETUNED_MODEL_PATH}. "
-                "Make sure the fine-tuned adapter is extracted there."
+                f"adapter_config.json not found in {FINETUNED_MODEL_PATH}."
             )
-
         adapter_cfg = json.load(open(adapter_config_path))
         base_id = adapter_cfg.get("base_model_name_or_path", "facebook/opt-125m")
         log.info("Loading base model '%s' on %s...", base_id, DEVICE)
 
         if DEVICE == "cuda":
-            # 4-bit quantization — needs GPU
             bnb = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_use_double_quant=True,
@@ -89,31 +99,22 @@ def _get_finetuned_model():
                 bnb_4bit_compute_dtype=torch.float16,
             )
             base = AutoModelForCausalLM.from_pretrained(
-                base_id,
-                quantization_config=bnb,
-                device_map="auto",
-                trust_remote_code=True,
-                torch_dtype=torch.float16,
+                base_id, quantization_config=bnb, device_map="auto",
+                trust_remote_code=True, torch_dtype=torch.float16,
             )
         else:
-            # CPU — no quantization (bitsandbytes requires CUDA)
             base = AutoModelForCausalLM.from_pretrained(
-                base_id,
-                torch_dtype=torch.float32,
-                trust_remote_code=True,
+                base_id, torch_dtype=torch.float32, trust_remote_code=True,
             )
 
         _finetuned_model = PeftModel.from_pretrained(base, FINETUNED_MODEL_PATH)
         _finetuned_model.eval()
-
         _finetuned_tokenizer = AutoTokenizer.from_pretrained(
             FINETUNED_MODEL_PATH, trust_remote_code=True
         )
         if _finetuned_tokenizer.pad_token is None:
             _finetuned_tokenizer.pad_token = _finetuned_tokenizer.eos_token
-
-        log.info("Fine-tuned model loaded successfully on %s", DEVICE)
-
+        log.info("Fine-tuned model loaded on %s", DEVICE)
     return _finetuned_model, _finetuned_tokenizer
 
 
@@ -172,55 +173,39 @@ def extract_issue_and_summary(customer_text: str, full_text: str) -> dict:
     def _fallback():
         words = text.split()
         return {
-            "issue_title":    " ".join(words[:8]),
-            "summary":        text[:300],
-            "sentiment":      "neutral",
+            "issue_title":     " ".join(words[:8]),
+            "summary":         text[:300],
+            "sentiment":       "neutral",
             "sentiment_score": 0.0,
         }
 
     try:
         model, tokenizer = _get_finetuned_model()
-
         prompt = (
             f"### Instruction:\n{_INSTRUCTION}\n\n"
             f"### Input:\n{text}\n\n"
             f"### Response:\n"
         )
-
         inputs = tokenizer(prompt, return_tensors="pt").to(DEVICE)
-
         with torch.no_grad():
             out = model.generate(
-                **inputs,
-                max_new_tokens=200,
-                temperature=0.1,
-                do_sample=True,
-                pad_token_id=tokenizer.eos_token_id,
+                **inputs, max_new_tokens=200, temperature=0.1,
+                do_sample=True, pad_token_id=tokenizer.eos_token_id,
             )
-
         decoded = tokenizer.decode(out[0], skip_special_tokens=True)
         raw = decoded.split("### Response:")[-1].strip()
-
-        # Clean markdown fences if present
         raw = raw.replace("```json", "").replace("```", "").strip()
-
-        # Extract JSON object
         j_start = raw.find("{")
         j_end   = raw.rfind("}") + 1
         if j_start == -1 or j_end <= j_start:
-            log.warning("No JSON found in model output: %s", raw[:200])
             return _fallback()
-
         result = json.loads(raw[j_start:j_end])
         required = {"issue_title", "summary", "sentiment", "sentiment_score"}
         if not required.issubset(result.keys()):
-            log.warning("Missing keys in model output: %s", result)
             return _fallback()
-
         return result
-
     except FileNotFoundError as e:
-        log.warning("Fine-tuned model not found, using fallback. %s", e)
+        log.warning("Fine-tuned model not found: %s", e)
         return _fallback()
     except Exception as e:
         log.warning("Fine-tuned model error: %s", e)
@@ -228,13 +213,13 @@ def extract_issue_and_summary(customer_text: str, full_text: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Sentiment analysis (cardiffnlp — used as secondary check)
+# Sentiment analysis
 # ─────────────────────────────────────────────────────────────────────────────
 def analyze_sentiment(text: str) -> tuple[str, float]:
     if not text.strip():
         return "neutral", 0.0
     try:
-        results  = _get_sentiment()(text[:512])[0]
+        results   = _get_sentiment()(text[:512])[0]
         label_map = {"LABEL_0": "negative", "LABEL_1": "neutral", "LABEL_2": "positive"}
         score_map = {"negative": -1, "neutral": 0, "positive": 1}
         best  = max(results, key=lambda x: x["score"])
@@ -246,61 +231,106 @@ def analyze_sentiment(text: str) -> tuple[str, float]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Embeddings + deduplication
+# Embeddings
 # ─────────────────────────────────────────────────────────────────────────────
 def embed(text: str) -> list[float]:
     return _get_embedder().encode(text, normalize_embeddings=True).tolist()
 
 
-def cosine_similarity(a: list[float], b: list[float]) -> float:
-    import math
-    dot   = sum(x * y for x, y in zip(a, b))
-    mag_a = math.sqrt(sum(x * x for x in a))
-    mag_b = math.sqrt(sum(x * x for x in b))
-    return dot / (mag_a * mag_b) if mag_a and mag_b else 0.0
-
-
+# ─────────────────────────────────────────────────────────────────────────────
+# ChromaDB deduplication (replaces manual cosine similarity)
+# ─────────────────────────────────────────────────────────────────────────────
 def deduplicate_issue(conn, issue_title: str, summary: str) -> int:
-    new_emb = embed(issue_title + " " + summary)
-    rows    = conn.execute("SELECT id, embedding FROM customer_issues").fetchall()
-    best_id, best_sim = None, 0.0
+    """
+    Uses ChromaDB to find duplicate issues via vector similarity.
+    If a similar issue exists (score >= threshold), increments its count.
+    Otherwise, inserts a new issue into both PostgreSQL and ChromaDB.
+    """
+    collection = _get_chroma()
+    query_text = issue_title + " " + summary
+    embedding  = embed(query_text)
 
-    for row in rows:
-        try:
-            sim = cosine_similarity(new_emb, json.loads(row["embedding"]))
-            if sim > best_sim:
-                best_sim, best_id = sim, row["id"]
-        except Exception:
-            continue
+    # Check if any issues exist in ChromaDB first
+    existing_count = collection.count()
+    best_pg_id = None
 
-    if best_sim >= SIMILARITY_THRESHOLD and best_id is not None:
-        conn.execute(
-            "UPDATE customer_issues SET count = count + 1, last_seen = ? WHERE id = ?",
-            (datetime.utcnow().isoformat(), best_id),
+    if existing_count > 0:
+        results = collection.query(
+            query_embeddings=[embedding],
+            n_results=1,
+            include=["distances", "metadatas"],
         )
-        return best_id
+        distances  = results["distances"][0]
+        metadatas  = results["metadatas"][0]
 
-    cur = conn.execute(
-        "INSERT INTO customer_issues (title, description, embedding) VALUES (?, ?, ?)",
-        (issue_title, summary, json.dumps(new_emb)),
+        if distances and metadatas:
+            # ChromaDB cosine distance: 0 = identical, 1 = opposite
+            # Convert to similarity: similarity = 1 - distance
+            similarity = 1.0 - distances[0]
+            if similarity >= SIMILARITY_THRESHOLD:
+                best_pg_id = int(metadatas[0]["pg_id"])
+                log.info(
+                    "Duplicate issue found (similarity=%.2f): pg_id=%d",
+                    similarity, best_pg_id,
+                )
+
+    if best_pg_id is not None:
+        # Increment count in PostgreSQL
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE customer_issues SET count = count + 1, last_seen = %s WHERE id = %s",
+            (datetime.utcnow().isoformat(), best_pg_id),
+        )
+        return best_pg_id
+
+    # New issue — insert into PostgreSQL first to get ID
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO customer_issues (title, description, embedding) VALUES (%s, %s, %s) RETURNING id",
+        (issue_title, summary, json.dumps(embedding)),
     )
-    return cur.lastrowid
+    new_pg_id = cur.fetchone()["id"]
+
+    # Then add to ChromaDB with pg_id as metadata
+    collection.add(
+        ids=[str(new_pg_id)],
+        embeddings=[embedding],
+        documents=[query_text],
+        metadatas=[{"pg_id": new_pg_id, "title": issue_title}],
+    )
+    log.info("New issue stored: pg_id=%d title='%s'", new_pg_id, issue_title)
+    return new_pg_id
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main pipeline
 # ─────────────────────────────────────────────────────────────────────────────
 def run_pipeline(call_log_id: int, audio_path: str, db_path: str = "calls.db"):
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    import psycopg2
+    import psycopg2.extras
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://crm_user:crm123@localhost:5433/crm_calls")
+
+    def parse_url(url):
+        url = url.replace("postgresql://", "").replace("postgres://", "")
+        user_pass, rest = url.split("@")
+        user, password = user_pass.split(":")
+        host_port, dbname = rest.split("/")
+        host, port = (host_port.split(":") + ["5432"])[:2]
+        return dict(host=host, port=int(port), dbname=dbname, user=user, password=password)
+
+    conn = psycopg2.connect(**parse_url(DATABASE_URL), cursor_factory=psycopg2.extras.RealDictCursor)
     analysis_id: Optional[int] = None
 
     try:
-        cur = conn.execute(
-            "INSERT INTO call_analysis (call_log_id, audio_path, status) VALUES (?, ?, 'processing')",
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO call_analysis (call_log_id, audio_path, status) VALUES (%s, %s, 'processing') RETURNING id",
             (call_log_id, audio_path),
         )
-        analysis_id = cur.lastrowid
+        analysis_id = cur.fetchone()["id"]
         conn.commit()
 
         # 1. Transcribe
@@ -313,26 +343,27 @@ def run_pipeline(call_log_id: int, audio_path: str, db_path: str = "calls.db"):
         issue_title = llm_out.get("issue_title", "Unknown issue")
         summary     = llm_out.get("summary", "")
 
-        # 3. Sentiment (use cardiffnlp as ground truth, fine-tuned as backup)
+        # 3. Sentiment
         sentiment_label, sentiment_score = analyze_sentiment(customer_text or full_text)
 
-        # 4. Deduplicate issue
+        # 4. Deduplicate via ChromaDB
         issue_id = deduplicate_issue(conn, issue_title, summary)
 
         # 5. Save results
-        conn.execute("""
+        cur = conn.cursor()
+        cur.execute("""
             UPDATE call_analysis SET
-                transcript=?, agent_text=?, customer_text=?,
-                summary=?, issue_title=?, sentiment=?, sentiment_score=?,
+                transcript=%s, agent_text=%s, customer_text=%s,
+                summary=%s, issue_title=%s, sentiment=%s, sentiment_score=%s,
                 status='done', error_msg=NULL
-            WHERE id=?
+            WHERE id=%s
         """, (
             json.dumps(merged), agent_text, customer_text,
             summary, issue_title, sentiment_label, sentiment_score,
             analysis_id,
         ))
-        conn.execute(
-            "INSERT INTO issue_occurrences (issue_id, call_analysis_id) VALUES (?, ?)",
+        cur.execute(
+            "INSERT INTO issue_occurrences (issue_id, call_analysis_id) VALUES (%s, %s)",
             (issue_id, analysis_id),
         )
         conn.commit()
@@ -341,8 +372,9 @@ def run_pipeline(call_log_id: int, audio_path: str, db_path: str = "calls.db"):
     except Exception as e:
         log.exception("[%d] Pipeline error: %s", call_log_id, e)
         if analysis_id:
-            conn.execute(
-                "UPDATE call_analysis SET status='error', error_msg=? WHERE id=?",
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE call_analysis SET status='error', error_msg=%s WHERE id=%s",
                 (str(e), analysis_id),
             )
             conn.commit()

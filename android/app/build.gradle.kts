@@ -1,11 +1,12 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
+    id("kotlin-kapt")
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
-    namespace = "com.example.crm_app"
+    namespace  = "com.example.crm_app"
     compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
@@ -20,11 +21,10 @@ android {
 
     defaultConfig {
         applicationId = "com.example.crm_app"
-        // minSdk 29 required for foregroundServiceType="microphone" (Android 10+)
-        minSdk = 29
-        targetSdk = 36
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        minSdk        = 29   // Android 10+ required for foregroundServiceType="microphone"
+        targetSdk     = 36
+        versionCode   = flutter.versionCode
+        versionName   = flutter.versionName
     }
 
     buildTypes {
@@ -39,8 +39,11 @@ flutter {
 }
 
 dependencies {
-    // HTTP client for uploading recordings to backend
+    // HTTP client for uploading recordings to backend (single entry — removed duplicate)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    // Coroutines for background upload
+    // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    // Room (local DB)
+    implementation("androidx.room:room-runtime:2.7.0")
+    kapt("androidx.room:room-compiler:2.7.0")
 }

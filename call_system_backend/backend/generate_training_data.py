@@ -1,15 +1,3 @@
-"""
-generate_training_data.py
-─────────────────────────
-Phase 2 — Synthetic multilingual call data generator.
-Uses your already-running Ollama (llama3.1) to create training samples
-in all 6 language variants your call centre handles.
-
-Usage:
-    python generate_training_data.py
-    python generate_training_data.py --samples 200 --output data/train.jsonl
-"""
-
 from __future__ import annotations
 import json
 import argparse
@@ -25,7 +13,6 @@ log = logging.getLogger("datagen")
 
 OLLAMA_MODEL = "llama3.1"
 
-# ── Language variants your call centre handles ────────────────────────────────
 LANGUAGE_VARIANTS = [
     "English",
     "Hindi",
@@ -35,7 +22,6 @@ LANGUAGE_VARIANTS = [
     "Marathi-English mix (Marathi sentences with English technical words)",
 ]
 
-# ── Real-world CRM issues your agents deal with ───────────────────────────────
 ISSUE_CATEGORIES = [
     "billing dispute or overcharge",
     "internet not working or slow speed",
@@ -54,11 +40,10 @@ ISSUE_CATEGORIES = [
     "KYC document verification pending",
 ]
 
-# ── Sentiment distribution (realistic: mostly negative in support calls) ──────
 SENTIMENTS = {
-    "negative": 0.55,   # frustrated, angry customers
-    "neutral":  0.25,   # calm, just asking
-    "positive": 0.20,   # happy, resolved call
+    "negative": 0.55,   
+    "neutral":  0.25,   
+    "positive": 0.20,   
 }
 
 SENTIMENT_MOODS = {
