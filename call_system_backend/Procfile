@@ -1,2 +1,2 @@
-web: pip install --no-build-isolation openai-whisper==20231117 && uvicorn app.main:app --host 0.0.0.0 --port $PORT
-worker: pip install --no-build-isolation openai-whisper==20231117 && celery -A celery_app worker --loglevel=info --concurrency=1
+web: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+worker: celery -A celery_app worker --loglevel=info --concurrency=1

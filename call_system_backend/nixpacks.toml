@@ -1,0 +1,4 @@
+[phases.build]
+cmds = [
+  "pip install --no-build-isolation openai-whisper==20231117"
+]
