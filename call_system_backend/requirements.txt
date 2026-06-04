@@ -1,4 +1,4 @@
-setuptools
+setuptools>=68.0
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
 celery[redis]==5.3.6
@@ -15,7 +15,7 @@ transformers==4.40.0
 peft==0.10.0
 sentence-transformers==2.7.0
 chromadb==0.5.0
-openai-whisper==20231117
+openai-whisper @ https://github.com/openai/whisper/archive/refs/tags/v20231117.tar.gz
 accelerate==0.29.3
 bitsandbytes==0.43.1
 ffmpeg-python==0.2.0
