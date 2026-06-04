@@ -1,7 +1,3 @@
-"""
-database.py — PostgreSQL version (Phase 3)
-Replaces SQLite with PostgreSQL via psycopg2.
-"""
 import os
 import psycopg2
 import psycopg2.extras
@@ -10,24 +6,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Connection config ─────────────────────────────────────────────────────────
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://crm_user:crm123@localhost:5433/crm_calls"
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set. Check your .env or Railway variables.")
 
 
 def _parse_url(url: str) -> dict:
-    """Parse postgresql://user:pass@host:port/dbname into psycopg2 kwargs."""
     url = url.replace("postgresql://", "").replace("postgres://", "")
-    user_pass, rest = url.split("@")
-    user, password = user_pass.split(":")
-    host_port, dbname = rest.split("/")
-    if ":" in host_port:
-        host, port = host_port.split(":")
-    else:
-        host, port = host_port, "5432"
-    return dict(host=host, port=int(port), dbname=dbname, user=user, password=password)
+    user_pass, rest = url.split("@", 1)
+    user, password   = user_pass.split(":", 1)
+    host_port, dbname = rest.split("/", 1)
+    host, port = (host_port.split(":") + ["5432"])[:2]
+    return dict(host=host, port=int(port), dbname=dbname,
+                user=user, password=password)
 
 
 _conn_kwargs = _parse_url(DATABASE_URL)
@@ -35,7 +26,6 @@ _conn_kwargs = _parse_url(DATABASE_URL)
 
 @contextmanager
 def get_conn():
-    """Context manager — yields a psycopg2 connection, auto-commits or rolls back."""
     conn = psycopg2.connect(
         **_conn_kwargs,
         cursor_factory=psycopg2.extras.RealDictCursor,
@@ -51,7 +41,6 @@ def get_conn():
 
 
 def init_db():
-    """Create all tables if they don't exist."""
     with get_conn() as conn:
         cur = conn.cursor()
 
@@ -72,7 +61,8 @@ def init_db():
         cur.execute("""
             CREATE TABLE IF NOT EXISTS call_analysis (
                 id              SERIAL PRIMARY KEY,
-                call_log_id     INTEGER NOT NULL REFERENCES call_logs(id) ON DELETE CASCADE,
+                call_log_id     INTEGER NOT NULL
+                                    REFERENCES call_logs(id) ON DELETE CASCADE,
                 audio_path      TEXT,
                 transcript      TEXT,
                 agent_text      TEXT,
@@ -102,10 +92,12 @@ def init_db():
         cur.execute("""
             CREATE TABLE IF NOT EXISTS issue_occurrences (
                 id               SERIAL PRIMARY KEY,
-                issue_id         INTEGER NOT NULL REFERENCES customer_issues(id),
-                call_analysis_id INTEGER NOT NULL REFERENCES call_analysis(id),
+                issue_id         INTEGER NOT NULL
+                                     REFERENCES customer_issues(id),
+                call_analysis_id INTEGER NOT NULL
+                                     REFERENCES call_analysis(id),
                 created_at       TIMESTAMP DEFAULT NOW()
             )
         """)
 
-        print("✅ PostgreSQL tables ready")
+        print("PostgreSQL tables ready")

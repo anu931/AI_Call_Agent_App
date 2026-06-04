@@ -1,58 +1,75 @@
-# ── Python backend ────────────────────────────────────────────────────────────
-call_system_backend/venv/
-call_system_backend/__pycache__/
-call_system_backend/app/__pycache__/
-call_system_backend/app/api/__pycache__/
-call_system_backend/app/models/__pycache__/
-call_system_backend/*.db
-call_system_backend/uploads/
-*.pyc
-*.pyo
-*.pyd
-.env
-
-# ── Flutter ───────────────────────────────────────────────────────────────────
+# ─── Flutter / Dart ───────────────────────────────────────────────────────────
 build/
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
-.packages
-*.g.dart
-*.freezed.dart
-pubspec.lock
+*.iml
+.idea/
+.vscode/
+*.log
 
-# ── Android ───────────────────────────────────────────────────────────────────
+# Android
 android/.gradle/
-android/app/build/
-android/build/
 android/local.properties
-android/key.properties
-*.jks
+android/app/debug/
+android/app/release/
+android/app/profile/
+*.apk
+*.aab
 *.keystore
+*.jks
 
-# ── iOS ───────────────────────────────────────────────────────────────────────
+# iOS
 ios/Pods/
 ios/.symlinks/
 ios/Flutter/Flutter.framework
 ios/Flutter/Flutter.podspec
-ios/Runner.xcworkspace/
 *.ipa
 
-# ── IDE ───────────────────────────────────────────────────────────────────────
-.idea/
-.vscode/settings.json
-*.iml
+# ─── Python / Backend ─────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+.Python
+venv/
+env/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+*.egg-info/
+dist/
+*.egg
 
-# ── OS ────────────────────────────────────────────────────────────────────────
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.production
+call_system_backend/.env
+call_system_backend/.env.local
+
+# ─── ML Models (too large for GitHub) ────────────────────────────────────────
+*.safetensors
+*.bin
+*.pt
+*.pth
+checkpoint-*/
+call_system_backend/call_center_lora_adapter/
+call_system_backend/chroma_db/
+
+# ─── Database & uploads ───────────────────────────────────────────────────────
+*.db
+*.sqlite3
+calls.db
+call_system_backend/uploads/
+
+# ─── OS files ─────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# ── Recordings (real call audio — never commit) ───────────────────────────────
-*.m4a
-*.mp3
-*.wav
-*.aac
-
-# ── Logs ─────────────────────────────────────────────────────────────────────
+# ─── Misc ─────────────────────────────────────────────────────────────────────
 *.log
+*.tmp
+*.bak
