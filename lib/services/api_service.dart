@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
@@ -34,5 +35,35 @@ class ApiService {
       }
     } catch (_) {}
     return [];
+  }
+
+  static Future<Map<String, dynamic>> uploadRecording({
+  required String filePath,
+  required String number,
+  required String name,
+}) async {
+  try {
+    var uri = Uri.parse('$_base/upload-recording');
+    var request = http.MultipartRequest('POST', uri);
+    request.fields['phone_number'] = number;
+    request.fields['contact_name'] = name;
+    
+    var file = File(filePath);
+    var stream = http.ByteStream(file.openRead());
+    var length = await file.length();
+    request.files.add(http.MultipartFile(
+      'audio_file', stream, length,
+      filename: filePath.split('/').last,
+    ));
+    
+    var response = await request.send();
+    var body = await response.stream.bytesToString();
+    if (response.statusCode == 200) {
+      return jsonDecode(body);
+    }
+    return {'error': 'Upload failed: ${response.statusCode}'};
+  } catch (e) {
+    return {'error': e.toString()};
+  }
   }
 }

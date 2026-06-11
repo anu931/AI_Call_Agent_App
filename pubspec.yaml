@@ -28,7 +28,7 @@ dependencies:
 
   # Local SQLite cache (remove if Flutter never reads/writes data offline)
   # sqflite: ^2.3.3
-
+  file_picker: ^8.1.2        
   cupertino_icons: ^1.0.8
 
 dev_dependencies:

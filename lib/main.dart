@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'screens/home_screen.dart';
 import 'screens/call_log_screen.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'screens/upload_recording_screen.dart';
 
 Future<void> requestPermissions() async {
   await Permission.microphone.request();
@@ -35,17 +36,10 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _page = 0;
   final _pages = const [
-    HomeScreen(),
-    CallLogScreen(),
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      requestPermissions();
-    });
-  }
+  HomeScreen(),
+  CallLogScreen(),
+  UploadRecordingScreen(),    // ADD
+];
 
   @override
   Widget build(BuildContext context) {
@@ -57,6 +51,7 @@ class _AppShellState extends State<AppShell> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.list_alt), label: 'Call Log'),
+          BottomNavigationBarItem(icon: Icon(Icons.upload_file), label: 'Upload'),
         ],
       ),
     );

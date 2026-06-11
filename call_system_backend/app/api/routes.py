@@ -193,3 +193,55 @@ def get_stats():
         "negative":     negative,
         "top_issues":   top_issues,
     }
+    
+@router.post("/upload-recording")
+async def upload_recording_from_app(
+    audio_file: UploadFile = File(...),
+    contact_name: str = "Unknown",
+    phone_number: str = "Unknown",
+):
+    """
+    Called by Flutter app when user manually picks a recording file.
+    Accepts any format (m4a, mp3, amr, ogg, aac, 3gp) → converts to WAV → Celery processes it.
+    """
+    import shutil
+    from pydub import AudioSegment
+
+    # Save original file
+    original_path = UPLOAD_DIR / audio_file.filename
+    with original_path.open("wb") as buf:
+        shutil.copyfileobj(audio_file.file, buf)
+
+    # Convert ANY format → WAV
+    wav_path = original_path.with_suffix(".wav")
+    try:
+        AudioSegment.from_file(str(original_path)).set_frame_rate(16000).set_channels(1).export(str(wav_path), format="wav")
+        original_path.unlink()  # delete original after conversion
+        final_path = wav_path
+    except Exception as e:
+        final_path = original_path  # fallback: keep original
+        print(f"⚠️ Conversion failed: {e}")
+
+    now = datetime.utcnow()
+
+    # Save to DB
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO call_logs (number, name, duration, recording, date, time, is_incoming)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)
+               RETURNING id""",
+            (phone_number, contact_name, 0, str(final_path),
+             now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S"), 1),
+        )
+        call_log_id = cur.fetchone()["id"]
+
+    # Queue AI processing via Celery (same as your existing /upload route)
+    task = process_call.delay(call_log_id, str(final_path))
+
+    return {
+        "call_log_id": call_log_id,
+        "task_id": task.id,
+        "status": "queued",
+        "message": f"Recording received for {contact_name}, processing started"
+    }
