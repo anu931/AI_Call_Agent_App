@@ -1,3 +1,5 @@
+// lib/screens/call_log_screen.dart
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -6,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:http/http.dart' as http;
+import '../config/app_config.dart';    // ✅ import config
 import 'analysis_screen.dart';
 
 class CallLogScreen extends StatefulWidget {
@@ -17,11 +20,10 @@ class CallLogScreen extends StatefulWidget {
 
 class _CallLogScreenState extends State<CallLogScreen> {
   static const _channel = MethodChannel('com.example.crm_app/call_logs');
-  static const _base    = 'http://192.168.1.6:8000';
 
   List<Map<String, dynamic>> _logs      = [];
-  Map<int, Map<String, dynamic>> _analysis = {}; // call id → analysis
-  Set<int> _polling                     = {};    // ids currently being polled
+  Map<int, Map<String, dynamic>> _analysis = {};
+  Set<int> _polling                     = {};
   bool _loading                         = true;
   final AudioPlayer _player             = AudioPlayer();
   int? _playingId;
@@ -44,7 +46,6 @@ class _CallLogScreenState extends State<CallLogScreen> {
     super.dispose();
   }
 
-  // ── Load local call logs from Android DB ────────────────────────────────────
   Future<void> _loadLogs() async {
     setState(() => _loading = true);
     try {
@@ -52,7 +53,6 @@ class _CallLogScreenState extends State<CallLogScreen> {
       final logs = raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       setState(() { _logs = logs; _loading = false; });
 
-      // For each log, fetch existing analysis then start polling if not done
       for (final log in logs) {
         final id = log['id'] as int;
         await _fetchAnalysis(id);
@@ -62,23 +62,23 @@ class _CallLogScreenState extends State<CallLogScreen> {
     }
   }
 
-  // ── Fetch analysis once ──────────────────────────────────────────────────────
   Future<void> _fetchAnalysis(int callId) async {
     try {
       final r = await http
-          .get(Uri.parse('$_base/calls/analysis/$callId'))
+          .get(
+            Uri.parse('${AppConfig.backendBase}/calls/analysis/$callId'), // ✅
+            headers: AppConfig.ngrokHeaders,                              // ✅
+          )
           .timeout(const Duration(seconds: 8));
 
       if (r.statusCode == 200) {
         final data = Map<String, dynamic>.from(jsonDecode(r.body) as Map);
         setState(() => _analysis[callId] = data);
-
         final status = data['status'] as String? ?? 'pending';
         if (status != 'done' && status != 'error') {
           _startPolling(callId);
         }
       } else if (r.statusCode == 404) {
-        // Analysis not created yet — start polling
         _startPolling(callId);
       }
     } catch (_) {
@@ -86,7 +86,6 @@ class _CallLogScreenState extends State<CallLogScreen> {
     }
   }
 
-  // ── Poll until done ──────────────────────────────────────────────────────────
   void _startPolling(int callId) {
     if (_polling.contains(callId)) return;
     _polling.add(callId);
@@ -96,13 +95,15 @@ class _CallLogScreenState extends State<CallLogScreen> {
 
       try {
         final r = await http
-            .get(Uri.parse('$_base/calls/analysis/$callId'))
+            .get(
+              Uri.parse('${AppConfig.backendBase}/calls/analysis/$callId'), // ✅
+              headers: AppConfig.ngrokHeaders,                              // ✅
+            )
             .timeout(const Duration(seconds: 8));
 
         if (r.statusCode == 200) {
           final data = Map<String, dynamic>.from(jsonDecode(r.body) as Map);
           setState(() => _analysis[callId] = data);
-
           final status = data['status'] as String? ?? 'pending';
           if (status == 'done' || status == 'error') {
             timer.cancel();
@@ -113,7 +114,6 @@ class _CallLogScreenState extends State<CallLogScreen> {
     });
   }
 
-  // ── Audio playback ───────────────────────────────────────────────────────────
   Future<void> _togglePlay(Map<String, dynamic> log) async {
     final id   = log['id'] as int;
     final path = log['recording_path'] as String? ?? '';
@@ -138,7 +138,6 @@ class _CallLogScreenState extends State<CallLogScreen> {
     }
   }
 
-  // ── Delete ───────────────────────────────────────────────────────────────────
   Future<void> _delete(Map<String, dynamic> log) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -146,7 +145,9 @@ class _CallLogScreenState extends State<CallLogScreen> {
         title: const Text('Delete Log'),
         content: Text('Delete log for ${log['phone_number']}?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete', style: TextStyle(color: Colors.red)),
@@ -160,7 +161,6 @@ class _CallLogScreenState extends State<CallLogScreen> {
     }
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
   String _fmtDate(int ms) {
     final dt  = DateTime.fromMillisecondsSinceEpoch(ms);
     final now = DateTime.now();
@@ -181,7 +181,6 @@ class _CallLogScreenState extends State<CallLogScreen> {
     _          => Colors.orange,
   };
 
-  // ── Build ────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -211,7 +210,8 @@ class _CallLogScreenState extends State<CallLogScreen> {
                     children: [
                       Icon(Icons.call_outlined, size: 72, color: Colors.grey.shade600),
                       const SizedBox(height: 12),
-                      const Text('No call logs yet', style: TextStyle(fontSize: 17)),
+                      const Text('No call logs yet',
+                          style: TextStyle(fontSize: 17)),
                       const Text('Calls will appear here automatically',
                           style: TextStyle(color: Colors.grey)),
                     ],
@@ -229,17 +229,17 @@ class _CallLogScreenState extends State<CallLogScreen> {
 
   Widget _buildCard(Map<String, dynamic> log) {
     final id           = log['id'] as int;
-    final number       = log['phone_number'] as String? ?? 'Unknown';
-    final callTime     = log['call_time']    as int? ?? 0;
-    final duration     = log['duration']     as int? ?? 0;
-    final isIncoming   = log['is_incoming']  as bool? ?? true;
-    final recordPath   = log['recording_path'] as String? ?? '';
+    final number       = log['phone_number']   as String? ?? 'Unknown';
+    final callTime     = log['call_time']       as int?    ?? 0;
+    final duration     = log['duration']        as int?    ?? 0;
+    final isIncoming   = log['is_incoming']     as bool?   ?? true;
+    final recordPath   = log['recording_path']  as String? ?? '';
     final hasRecording = recordPath.isNotEmpty;
     final thisPlaying  = _playingId == id && _isPlaying;
 
     final analysis  = _analysis[id];
-    final status    = analysis?['status'] as String?;
-    final sentiment = analysis?['sentiment'] as String?;
+    final status    = analysis?['status']      as String?;
+    final sentiment = analysis?['sentiment']   as String?;
     final issue     = analysis?['issue_title'] as String?;
     final isPolling = _polling.contains(id);
 
@@ -263,40 +263,41 @@ class _CallLogScreenState extends State<CallLogScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Avatar
               CircleAvatar(
                 backgroundColor: isIncoming
                     ? Colors.green.shade900
                     : Colors.blue.shade900,
                 child: Icon(
                   isIncoming ? Icons.call_received : Icons.call_made,
-                  color: isIncoming ? Colors.greenAccent : Colors.lightBlueAccent,
+                  color: isIncoming
+                      ? Colors.greenAccent
+                      : Colors.lightBlueAccent,
                   size: 18,
                 ),
               ),
               const SizedBox(width: 12),
-
-              // Main info
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Number + time
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(number,
-                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                        Text('${_fmtDate(callTime)}  •  ${_fmtDur(duration)}',
-                            style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600, fontSize: 14)),
+                        Text(
+                          '${_fmtDate(callTime)}  •  ${_fmtDur(duration)}',
+                          style: TextStyle(
+                              fontSize: 11, color: Colors.grey.shade500),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 4),
-
-                    // Status / issue line
                     if (status == 'done' && issue != null)
                       Text(issue,
-                          style: TextStyle(fontSize: 12, color: Colors.grey.shade300),
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade300),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis)
                     else if (isPolling || status == 'processing')
@@ -304,29 +305,32 @@ class _CallLogScreenState extends State<CallLogScreen> {
                         SizedBox(
                           width: 10, height: 10,
                           child: CircularProgressIndicator(
-                              strokeWidth: 1.5, color: Colors.grey.shade500),
+                              strokeWidth: 1.5,
+                              color: Colors.grey.shade500),
                         ),
                         const SizedBox(width: 6),
                         Text('Analysing...',
-                            style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey.shade500)),
                       ])
                     else if (status == 'error')
                       Text('Analysis failed',
-                          style: TextStyle(fontSize: 12, color: Colors.red.shade400))
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.red.shade400))
                     else
                       Text('Waiting for analysis',
-                          style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade600)),
                     const SizedBox(height: 6),
-
-                    // Bottom row: sentiment + recording icon
                     Row(
                       children: [
                         if (status == 'done' && sentiment != null)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
                             decoration: BoxDecoration(
-                              color: _sentimentColor(sentiment).withValues(alpha: 0.15),
+                              color: _sentimentColor(sentiment)
+                                  .withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
@@ -340,15 +344,20 @@ class _CallLogScreenState extends State<CallLogScreen> {
                           ),
                         const Spacer(),
                         if (hasRecording) ...[
-                          Icon(Icons.mic, size: 12, color: Colors.redAccent.shade100),
+                          Icon(Icons.mic,
+                              size: 12, color: Colors.redAccent.shade100),
                           const SizedBox(width: 3),
                           Text('Recorded',
-                              style: TextStyle(fontSize: 11, color: Colors.redAccent.shade100)),
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.redAccent.shade100)),
                           const SizedBox(width: 8),
                           GestureDetector(
                             onTap: () => _togglePlay(log),
                             child: Icon(
-                              thisPlaying ? Icons.pause_circle : Icons.play_circle,
+                              thisPlaying
+                                  ? Icons.pause_circle
+                                  : Icons.play_circle,
                               color: Colors.lightBlueAccent,
                               size: 24,
                             ),
@@ -356,7 +365,8 @@ class _CallLogScreenState extends State<CallLogScreen> {
                         ],
                         const SizedBox(width: 4),
                         IconButton(
-                          icon: Icon(Icons.delete_outline, color: Colors.red.shade400, size: 20),
+                          icon: Icon(Icons.delete_outline,
+                              color: Colors.red.shade400, size: 20),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
                           onPressed: () => _delete(log),

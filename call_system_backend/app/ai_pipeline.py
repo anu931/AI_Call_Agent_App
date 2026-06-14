@@ -9,6 +9,27 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import PeftModel
 
+# ── Keyword-based issue extraction for any language ──────────────────────────
+_ISSUE_KEYWORDS = {
+    "billing":   ["bill", "charge", "payment", "refund", "money", "paid", "amount",
+                  "पैसे", "बिल", "चार्ज", "रिफंड", "भुगतान", "पेमेंट",
+                  "पैसा", "कटे", "कट", "दोबारा", "वापस"],
+    "network":   ["internet", "connection", "network", "signal", "slow", "drop",
+                  "नेटवर्क", "कनेक्शन", "इंटरनेट", "सिग्नल", "स्पीड"],
+    "account":   ["account", "login", "password", "access", "blocked",
+                  "अकाउंट", "पासवर्ड", "लॉगिन", "ब्लॉक", "अकाउन्ट"],
+    "delivery":  ["deliver", "order", "package", "ship", "received",
+                  "डिलीवरी", "ऑर्डर", "पैकेज", "मिला", "नहीं मिला"],
+    "technical": ["error", "crash", "bug", "not working", "issue", "problem",
+                  "एरर", "काम नहीं", "समस्या", "खराब", "नहीं चल"],
+}
+
+def detect_issue_category(text: str) -> str:
+    text_lower = text.lower()
+    for category, keywords in _ISSUE_KEYWORDS.items():
+        if any(kw in text_lower for kw in keywords):
+            return category
+    return "general"
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging
 # ─────────────────────────────────────────────────────────────────────────────
@@ -17,7 +38,7 @@ log = logging.getLogger("ai_pipeline")
 # ─────────────────────────────────────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────────────────────────────────────
-WHISPER_SIZE         = os.getenv("WHISPER_SIZE", "small")
+WHISPER_SIZE = os.getenv("WHISPER_SIZE", "base")  
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.80"))
 SENTIMENT_MODEL      = "cardiffnlp/twitter-roberta-base-sentiment-latest"
 EMBED_MODEL          = "sentence-transformers/all-MiniLM-L6-v2"
@@ -170,14 +191,30 @@ _INSTRUCTION = (
 def extract_issue_and_summary(customer_text: str, full_text: str) -> dict:
     text = (customer_text or full_text)[:1000]
 
-    def _fallback():
-        words = text.split()
+    def _smart_fallback():
+        category = detect_issue_category(text)
+        title_map = {
+            "billing":   "Billing / Payment Issue",
+            "network":   "Network / Connection Problem",
+            "account":   "Account Access Issue",
+            "delivery":  "Delivery / Order Issue",
+            "technical": "Technical / App Issue",
+            "general":   "General Customer Complaint",
+        }
+        issue_title = title_map.get(category, "Customer Support Issue")
+        summary = text[:300] if text else "No summary available"
         return {
-            "issue_title":     " ".join(words[:8]),
-            "summary":         text[:300],
-            "sentiment":       "neutral",
+            "issue_title": issue_title,
+            "summary": summary,
+            "sentiment": "neutral",
             "sentiment_score": 0.0,
         }
+
+    # Non-ASCII check — skip LLM for Hindi/Marathi
+    non_ascii = sum(1 for c in text if ord(c) > 127)
+    if non_ascii > len(text) * 0.3:
+        log.info("Non-English text detected — using keyword-based extraction")
+        return _smart_fallback()
 
     try:
         model, tokenizer = _get_finetuned_model()
@@ -198,20 +235,18 @@ def extract_issue_and_summary(customer_text: str, full_text: str) -> dict:
         j_start = raw.find("{")
         j_end   = raw.rfind("}") + 1
         if j_start == -1 or j_end <= j_start:
-            return _fallback()
+            return _smart_fallback()
         result = json.loads(raw[j_start:j_end])
         required = {"issue_title", "summary", "sentiment", "sentiment_score"}
         if not required.issubset(result.keys()):
-            return _fallback()
+            return _smart_fallback()
         return result
     except FileNotFoundError as e:
         log.warning("Fine-tuned model not found: %s", e)
-        return _fallback()
+        return _smart_fallback()
     except Exception as e:
         log.warning("Fine-tuned model error: %s", e)
-        return _fallback()
-
-
+        return _smart_fallback()
 # ─────────────────────────────────────────────────────────────────────────────
 # Sentiment analysis
 # ─────────────────────────────────────────────────────────────────────────────

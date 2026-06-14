@@ -1,13 +1,22 @@
-/// AppConfig — single source of truth for all runtime constants.
-/// Change [backendBase] here to update every screen and service at once.
+// lib/config/app_config.dart
+
 class AppConfig {
-  AppConfig._();
+  // ✅ Update ONLY this line when ngrok restarts
+static const String _ngrokUrl = 'https://margit-semisentimental-latonya.ngrok-free.dev';
 
-  /// Base URL of the FastAPI backend.
-  /// Override via --dart-define=BACKEND_URL=http://... for CI / different envs.
-  static const backendBase = String.fromEnvironment(
-    'BACKEND_URL',
-     defaultValue: 'https://aicallagentapp-production.up.railway.app', );
+  // Both names point to same URL — keeps all screens compatible
+  static const String baseUrl     = _ngrokUrl;
+  static const String backendBase = _ngrokUrl;  // ✅ fixes home_screen.dart error
 
-  static const methodChannel = 'com.example.crm_app/call_logs';
+  // Ngrok requires this header to skip browser warning page
+  static const Map<String, String> ngrokHeaders = {
+    'ngrok-skip-browser-warning': 'true',
+    'Content-Type': 'application/json',
+  };
+
+  // Timeouts
+  static const Duration uploadTimeout   = Duration(minutes: 5);
+  static const Duration analysisTimeout = Duration(minutes: 3);
+  static const Duration pollInterval    = Duration(seconds: 5);
+  static const int      maxPollAttempts = 36; // 36 × 5s = 3 min
 }

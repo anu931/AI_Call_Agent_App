@@ -200,31 +200,17 @@ async def upload_recording_from_app(
     contact_name: str = "Unknown",
     phone_number: str = "Unknown",
 ):
-    """
-    Called by Flutter app when user manually picks a recording file.
-    Accepts any format (m4a, mp3, amr, ogg, aac, 3gp) → converts to WAV → Celery processes it.
-    """
     import shutil
-    from pydub import AudioSegment
 
-    # Save original file
+    # Save original file — NO conversion needed, Whisper handles all formats
     original_path = UPLOAD_DIR / audio_file.filename
     with original_path.open("wb") as buf:
         shutil.copyfileobj(audio_file.file, buf)
 
-    # Convert ANY format → WAV
-    wav_path = original_path.with_suffix(".wav")
-    try:
-        AudioSegment.from_file(str(original_path)).set_frame_rate(16000).set_channels(1).export(str(wav_path), format="wav")
-        original_path.unlink()  # delete original after conversion
-        final_path = wav_path
-    except Exception as e:
-        final_path = original_path  # fallback: keep original
-        print(f"⚠️ Conversion failed: {e}")
+    final_path = original_path  # ✅ skip pydub entirely
 
     now = datetime.utcnow()
 
-    # Save to DB
     with get_conn() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -236,7 +222,6 @@ async def upload_recording_from_app(
         )
         call_log_id = cur.fetchone()["id"]
 
-    # Queue AI processing via Celery (same as your existing /upload route)
     task = process_call.delay(call_log_id, str(final_path))
 
     return {
